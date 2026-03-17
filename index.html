@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -119,6 +120,14 @@
       padding: 4px 8px;
       margin-right: 8px;
       margin-bottom: 8px;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    ul {
+      margin: 10px 0 0 18px;
+      padding: 0;
     }
   </style>
 </head>
@@ -143,7 +152,7 @@
         </label>
         <label><input id="warmupInput" type="checkbox" checked /> Warmup</label>
         <button id="runBtn">Run benchmark</button>
-        <button id="copyBtn">Copy summary</button>
+        <button id="copyBtn" disabled>Copy summary</button>
         <button id="clearBtn">Clear log</button>
       </div>
 
@@ -220,7 +229,7 @@
     envSecure.textContent = `secureContext: ${window.isSecureContext}`;
 
     function log(line = "") {
-      logEl.textContent += line + "\\n";
+      logEl.textContent += line + "\n";
       logEl.scrollTop = logEl.scrollHeight;
     }
 
@@ -292,7 +301,7 @@
 
       let offset = 0;
       let readMs = 0;
-      const tHash0 = performance.now();
+      const hash0 = performance.now();
 
       while (offset < file.size) {
         const end = Math.min(offset + chunkSize, file.size);
@@ -310,7 +319,7 @@
       return {
         approach: "hash-wasm main chunked",
         readMs,
-        hashMs: total1 - total0 - readMs,
+        hashMs: total1 - hash0 - readMs,
         totalMs: total1 - total0,
         digestHex
       };
@@ -319,8 +328,6 @@
     function makeWorker() {
       const code = `
         import { createSHA256 } from "https://cdn.jsdelivr.net/npm/hash-wasm@4.12.0/dist/index.esm.min.js";
-
-        const MiB = 1024 * 1024;
 
         function hex(buffer) {
           const arr = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
@@ -360,6 +367,7 @@
           const hasher = await createSHA256();
           let offset = 0;
           let readMs = 0;
+          const hash0 = performance.now();
 
           while (offset < file.size) {
             const end = Math.min(offset + chunkSize, file.size);
@@ -377,7 +385,7 @@
           return {
             approach: "hash-wasm worker chunked",
             readMs,
-            hashMs: total1 - total0 - readMs,
+            hashMs: total1 - hash0 - readMs,
             totalMs: total1 - total0,
             digestHex
           };
@@ -482,16 +490,17 @@
 
     function renderSummary(summary) {
       tbody.innerHTML = "";
+
       for (const row of summary) {
         const tr = document.createElement("tr");
         tr.innerHTML = `
-          <td>\${row.approach}</td>
-          <td class="mono">\${fmtMs(row.avgRead)}</td>
-          <td class="mono">\${fmtMs(row.avgHash)}</td>
-          <td class="mono">\${fmtMs(row.avgTotal)}</td>
-          <td class="mono">\${row.hashMiBps.toFixed(2)}</td>
-          <td class="mono">\${row.totalMiBps.toFixed(2)}</td>
-          <td class="\${row.digestMatch ? "good" : "bad"}">\${row.digestMatch ? "yes" : "no"}</td>
+          <td>${row.approach}</td>
+          <td class="mono">${fmtMs(row.avgRead)}</td>
+          <td class="mono">${fmtMs(row.avgHash)}</td>
+          <td class="mono">${fmtMs(row.avgTotal)}</td>
+          <td class="mono">${row.hashMiBps.toFixed(2)}</td>
+          <td class="mono">${row.totalMiBps.toFixed(2)}</td>
+          <td class="${row.digestMatch ? "good" : "bad"}">${row.digestMatch ? "yes" : "no"}</td>
         `;
         tbody.appendChild(tr);
       }
@@ -499,18 +508,20 @@
 
     function buildCopyableSummary(file, chunkSize, summary) {
       const lines = [];
-      lines.push(`SHA-256 browser benchmark`);
-      lines.push(`File: \${file.name}`);
-      lines.push(`Size: \${file.size} bytes (\${fmtMiB(file.size)} MiB)`);
-      lines.push(`Chunk size: \${fmtMiB(chunkSize)} MiB`);
-      lines.push(`UA: \${navigator.userAgent}`);
+      lines.push("SHA-256 browser benchmark");
+      lines.push(`File: ${file.name}`);
+      lines.push(`Size: ${file.size} bytes (${fmtMiB(file.size)} MiB)`);
+      lines.push(`Chunk size: ${fmtMiB(chunkSize)} MiB`);
+      lines.push(`UA: ${navigator.userAgent}`);
       lines.push("");
+
       for (const s of summary) {
         lines.push(
-          `\${s.approach}: avgRead=\${fmtMs(s.avgRead)}, avgHash=\${fmtMs(s.avgHash)}, avgTotal=\${fmtMs(s.avgTotal)}, hashMiBps=\${s.hashMiBps.toFixed(2)}, totalMiBps=\${s.totalMiBps.toFixed(2)}, digestMatch=\${s.digestMatch}`
+          `${s.approach}: avgRead=${fmtMs(s.avgRead)}, avgHash=${fmtMs(s.avgHash)}, avgTotal=${fmtMs(s.avgTotal)}, hashMiBps=${s.hashMiBps.toFixed(2)}, totalMiBps=${s.totalMiBps.toFixed(2)}, digestMatch=${s.digestMatch}`
         );
       }
-      return lines.join("\\n");
+
+      return lines.join("\n");
     }
 
     let lastSummaryText = "";
@@ -539,11 +550,11 @@
       try {
         log("");
         log("=== new benchmark ===");
-        log(`file: \${file.name}`);
-        log(`size: \${file.size} bytes (\${fmtMiB(file.size)} MiB)`);
-        log(`runs: \${runs}`);
-        log(`chunkSize: \${chunkSize} bytes (\${fmtMiB(chunkSize)} MiB)`);
-        log(`secureContext: \${window.isSecureContext}`);
+        log(`file: ${file.name}`);
+        log(`size: ${file.size} bytes (${fmtMiB(file.size)} MiB)`);
+        log(`runs: ${runs}`);
+        log(`chunkSize: ${chunkSize} bytes (${fmtMiB(chunkSize)} MiB)`);
+        log(`secureContext: ${window.isSecureContext}`);
         log("");
 
         if (doWarmup) {
@@ -555,15 +566,17 @@
 
         const all = [];
         for (let i = 0; i < runs; i++) {
-          setStatus(`running \${i + 1}/\${runs}`);
-          log(`Run \${i + 1}/\${runs}`);
+          setStatus(`running ${i + 1}/${runs}`);
+          log(`Run ${i + 1}/${runs}`);
           const run = await oneRun(file, chunkSize, worker);
+
           for (const r of run) {
             all.push(r);
             log(
-              `  \${r.approach}: read=\${fmtMs(r.readMs)}, hash=\${fmtMs(r.hashMs)}, total=\${fmtMs(r.totalMs)}, hashMiBps=\${fmtMiBps(file.size, r.hashMs)}, totalMiBps=\${fmtMiBps(file.size, r.totalMs)}`
+              `  ${r.approach}: read=${fmtMs(r.readMs)}, hash=${fmtMs(r.hashMs)}, total=${fmtMs(r.totalMs)}, hashMiBps=${fmtMiBps(file.size, r.hashMs)}, totalMiBps=${fmtMiBps(file.size, r.totalMs)}`
             );
           }
+
           log("");
         }
 
@@ -573,7 +586,7 @@
         log("=== summary ===");
         for (const s of summary) {
           log(
-            `\${s.approach}: avgRead=\${fmtMs(s.avgRead)}, avgHash=\${fmtMs(s.avgHash)}, avgTotal=\${fmtMs(s.avgTotal)}, minTotal=\${fmtMs(s.minTotal)}, maxTotal=\${fmtMs(s.maxTotal)}, hashMiBps=\${s.hashMiBps.toFixed(2)}, totalMiBps=\${s.totalMiBps.toFixed(2)}, digestMatch=\${s.digestMatch}`
+            `${s.approach}: avgRead=${fmtMs(s.avgRead)}, avgHash=${fmtMs(s.avgHash)}, avgTotal=${fmtMs(s.avgTotal)}, minTotal=${fmtMs(s.minTotal)}, maxTotal=${fmtMs(s.maxTotal)}, hashMiBps=${s.hashMiBps.toFixed(2)}, totalMiBps=${s.totalMiBps.toFixed(2)}, digestMatch=${s.digestMatch}`
           );
         }
         log("");
@@ -583,7 +596,7 @@
         setStatus("done");
       } catch (err) {
         console.error(err);
-        log(`ERROR: \${err?.message || String(err)}`);
+        log(`ERROR: ${err?.message || String(err)}`);
         setStatus("failed");
       } finally {
         worker.terminate();
@@ -608,6 +621,7 @@
       logEl.textContent = "";
       tbody.innerHTML = "";
       lastSummaryText = "";
+      copyBtn.disabled = true;
       setStatus("");
     });
   </script>

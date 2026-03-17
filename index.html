@@ -5,91 +5,241 @@
   <title>SHA-256 Browser Benchmark</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body {
-      font-family: system-ui, sans-serif;
-      max-width: 960px;
-      margin: 24px auto;
-      padding: 0 16px;
-      line-height: 1.4;
+    :root {
+      --bg: #0b1020;
+      --panel: #141b34;
+      --panel-2: #1b2445;
+      --text: #e9eefc;
+      --muted: #aeb8d6;
+      --accent: #7aa2ff;
+      --good: #7ee787;
+      --warn: #ffcc66;
+      --bad: #ff7b72;
+      --border: #2b3766;
     }
-    h1 { margin-bottom: 8px; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 14px/1.45 system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+    .muted { color: var(--muted); }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-top: 16px;
+    }
     .row {
       display: flex;
       gap: 12px;
       flex-wrap: wrap;
       align-items: center;
-      margin: 12px 0;
+      margin: 10px 0;
+    }
+    label {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
     }
     input[type="number"] {
-      width: 80px;
-      padding: 4px 6px;
+      width: 90px;
     }
-    button, input[type="file"] {
-      padding: 6px 8px;
-    }
-    pre {
-      background: #111;
-      color: #ddd;
-      padding: 16px;
+    input[type="number"], select, button, input[type="file"] {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
       border-radius: 8px;
-      overflow: auto;
-      min-height: 320px;
+      padding: 8px 10px;
+    }
+    button {
+      cursor: pointer;
+    }
+    button:hover {
+      border-color: var(--accent);
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .good { color: var(--good); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--bad); }
+    pre {
+      margin: 0;
       white-space: pre-wrap;
       word-break: break-word;
+      font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      max-height: 420px;
+      overflow: auto;
     }
-    .muted {
-      color: #555;
-      font-size: 0.95rem;
+    .grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .pill {
+      display: inline-block;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 4px 8px;
+      margin-right: 8px;
+      margin-bottom: 8px;
     }
   </style>
 </head>
 <body>
-  <h1>SHA-256 Browser Benchmark</h1>
-  <div class="muted">
-    Reads the selected file, transfers the buffer to a Web Worker, hashes with SubtleCrypto,
-    and logs timings plus throughput.
+  <div class="wrap">
+    <h1>SHA-256 browser benchmark</h1>
+    <div class="muted">
+      Compares native WebCrypto and incremental chunked hashing.
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <input id="fileInput" type="file" />
+        <label>Runs <input id="runsInput" type="number" min="1" max="20" value="4" /></label>
+        <label>Chunk size
+          <select id="chunkSizeSelect">
+            <option value="1048576">1 MiB</option>
+            <option value="4194304" selected>4 MiB</option>
+            <option value="8388608">8 MiB</option>
+            <option value="16777216">16 MiB</option>
+          </select>
+        </label>
+        <label><input id="warmupInput" type="checkbox" checked /> Warmup</label>
+        <button id="runBtn">Run benchmark</button>
+        <button id="copyBtn">Copy summary</button>
+        <button id="clearBtn">Clear log</button>
+      </div>
+
+      <div class="row muted">
+        <span class="pill" id="envUa"></span>
+        <span class="pill" id="envCores"></span>
+        <span class="pill" id="envMem"></span>
+        <span class="pill" id="envSecure"></span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="panel">
+        <div><strong>Results</strong></div>
+        <table id="resultsTable">
+          <thead>
+            <tr>
+              <th>Approach</th>
+              <th>Avg read</th>
+              <th>Avg hash</th>
+              <th>Avg total</th>
+              <th>Hash MiB/s</th>
+              <th>Total MiB/s</th>
+              <th>Digest match</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="panel">
+        <div><strong>Notes</strong></div>
+        <ul>
+          <li>WebCrypto paths read the whole file into memory before hashing.</li>
+          <li>Incremental paths read and hash by chunk, so they avoid one giant buffer.</li>
+          <li>Worker paths are mainly about UI responsiveness, not guaranteed raw speedup.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="row" style="justify-content: space-between;">
+        <strong>Log</strong>
+        <span class="muted" id="statusEl"></span>
+      </div>
+      <pre id="logEl"></pre>
+    </div>
   </div>
 
-  <div class="row">
-    <input id="fileInput" type="file" />
-    <label>
-      Runs:
-      <input id="runsInput" type="number" min="1" max="50" value="5" />
-    </label>
-    <label>
-      Warmup:
-      <input id="warmupInput" type="checkbox" checked />
-    </label>
-    <button id="runBtn">Run benchmark</button>
-    <button id="clearBtn">Clear log</button>
-  </div>
+  <script type="module">
+    import { createSHA256 } from "https://cdn.jsdelivr.net/npm/hash-wasm@4.12.0/dist/index.esm.min.js";
 
-  <pre id="log"></pre>
-
-  <script>
-    const logEl = document.getElementById("log");
     const fileInput = document.getElementById("fileInput");
     const runsInput = document.getElementById("runsInput");
+    const chunkSizeSelect = document.getElementById("chunkSizeSelect");
     const warmupInput = document.getElementById("warmupInput");
     const runBtn = document.getElementById("runBtn");
+    const copyBtn = document.getElementById("copyBtn");
     const clearBtn = document.getElementById("clearBtn");
+    const logEl = document.getElementById("logEl");
+    const statusEl = document.getElementById("statusEl");
+    const tbody = document.querySelector("#resultsTable tbody");
 
-    function log(msg = "") {
-      logEl.textContent += msg + "\n";
+    const envUa = document.getElementById("envUa");
+    const envCores = document.getElementById("envCores");
+    const envMem = document.getElementById("envMem");
+    const envSecure = document.getElementById("envSecure");
+
+    const MiB = 1024 * 1024;
+
+    envUa.textContent = `UA: ${navigator.userAgent}`;
+    envCores.textContent = `cores: ${navigator.hardwareConcurrency ?? "n/a"}`;
+    envMem.textContent = `deviceMemory: ${navigator.deviceMemory ?? "n/a"} GiB`;
+    envSecure.textContent = `secureContext: ${window.isSecureContext}`;
+
+    function log(line = "") {
+      logEl.textContent += line + "\\n";
       logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function setStatus(text) {
+      statusEl.textContent = text;
     }
 
     function fmtMs(ms) {
       return `${ms.toFixed(2)} ms`;
     }
 
-    function fmtMB(bytes) {
-      return (bytes / (1024 * 1024)).toFixed(2);
+    function fmtMiB(bytes) {
+      return (bytes / MiB).toFixed(2);
     }
 
-    function fmtMBps(bytes, ms) {
-      const seconds = ms / 1000;
-      return seconds > 0 ? (bytes / (1024 * 1024) / seconds).toFixed(2) : "0.00";
+    function fmtMiBps(bytes, ms) {
+      const s = ms / 1000;
+      if (!s) return "0.00";
+      return (bytes / MiB / s).toFixed(2);
     }
 
     function avg(arr) {
@@ -104,32 +254,147 @@
       return Math.max(...arr);
     }
 
-    function hexFromBuffer(buffer) {
-      const bytes = new Uint8Array(buffer);
+    function hex(buffer) {
+      const arr = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
       let out = "";
-      for (let i = 0; i < bytes.length; i++) {
-        out += bytes[i].toString(16).padStart(2, "0");
+      for (let i = 0; i < arr.length; i++) {
+        out += arr[i].toString(16).padStart(2, "0");
       }
       return out;
     }
 
-    function createWorker() {
-      const workerSource = `
+    async function readWholeFile(file) {
+      const t0 = performance.now();
+      const buffer = await file.arrayBuffer();
+      const t1 = performance.now();
+      return { buffer, readMs: t1 - t0 };
+    }
+
+    async function sha256SubtleMain(file) {
+      const total0 = performance.now();
+      const { buffer, readMs } = await readWholeFile(file);
+      const tHash0 = performance.now();
+      const digest = await crypto.subtle.digest("SHA-256", buffer);
+      const tHash1 = performance.now();
+      const total1 = performance.now();
+      return {
+        approach: "WebCrypto main",
+        readMs,
+        hashMs: tHash1 - tHash0,
+        totalMs: total1 - total0,
+        digestHex: hex(digest)
+      };
+    }
+
+    async function sha256HashWasmMain(file, chunkSize) {
+      const total0 = performance.now();
+      const hasher = await createSHA256();
+
+      let offset = 0;
+      let readMs = 0;
+      const tHash0 = performance.now();
+
+      while (offset < file.size) {
+        const end = Math.min(offset + chunkSize, file.size);
+        const tRead0 = performance.now();
+        const chunk = await file.slice(offset, end).arrayBuffer();
+        const tRead1 = performance.now();
+        readMs += (tRead1 - tRead0);
+        hasher.update(new Uint8Array(chunk));
+        offset = end;
+      }
+
+      const digestHex = hasher.digest("hex");
+      const total1 = performance.now();
+
+      return {
+        approach: "hash-wasm main chunked",
+        readMs,
+        hashMs: total1 - total0 - readMs,
+        totalMs: total1 - total0,
+        digestHex
+      };
+    }
+
+    function makeWorker() {
+      const code = `
+        import { createSHA256 } from "https://cdn.jsdelivr.net/npm/hash-wasm@4.12.0/dist/index.esm.min.js";
+
+        const MiB = 1024 * 1024;
+
+        function hex(buffer) {
+          const arr = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+          let out = "";
+          for (let i = 0; i < arr.length; i++) {
+            out += arr[i].toString(16).padStart(2, "0");
+          }
+          return out;
+        }
+
+        async function readWholeFile(file) {
+          const t0 = performance.now();
+          const buffer = await file.arrayBuffer();
+          const t1 = performance.now();
+          return { buffer, readMs: t1 - t0 };
+        }
+
+        async function subtleWorker(file) {
+          const total0 = performance.now();
+          const { buffer, readMs } = await readWholeFile(file);
+          const tHash0 = performance.now();
+          const digest = await crypto.subtle.digest("SHA-256", buffer);
+          const tHash1 = performance.now();
+          const total1 = performance.now();
+
+          return {
+            approach: "WebCrypto worker",
+            readMs,
+            hashMs: tHash1 - tHash0,
+            totalMs: total1 - total0,
+            digestHex: hex(digest)
+          };
+        }
+
+        async function hashWasmWorker(file, chunkSize) {
+          const total0 = performance.now();
+          const hasher = await createSHA256();
+          let offset = 0;
+          let readMs = 0;
+
+          while (offset < file.size) {
+            const end = Math.min(offset + chunkSize, file.size);
+            const tRead0 = performance.now();
+            const chunk = await file.slice(offset, end).arrayBuffer();
+            const tRead1 = performance.now();
+            readMs += (tRead1 - tRead0);
+            hasher.update(new Uint8Array(chunk));
+            offset = end;
+          }
+
+          const digestHex = hasher.digest("hex");
+          const total1 = performance.now();
+
+          return {
+            approach: "hash-wasm worker chunked",
+            readMs,
+            hashMs: total1 - total0 - readMs,
+            totalMs: total1 - total0,
+            digestHex
+          };
+        }
+
         self.onmessage = async (event) => {
-          const { id, buffer } = event.data;
+          const { id, type, file, chunkSize } = event.data;
           try {
-            const t0 = performance.now();
-            const digest = await crypto.subtle.digest("SHA-256", buffer);
-            const t1 = performance.now();
-            self.postMessage(
-              {
-                id,
-                ok: true,
-                digest,
-                hashMs: t1 - t0
-              },
-              [digest]
-            );
+            let result;
+            if (type === "subtle-worker") {
+              result = await subtleWorker(file);
+            } else if (type === "hashwasm-worker") {
+              result = await hashWasmWorker(file, chunkSize);
+            } else {
+              throw new Error("Unknown worker type: " + type);
+            }
+            self.postMessage({ id, ok: true, result });
           } catch (err) {
             self.postMessage({
               id,
@@ -139,25 +404,24 @@
           }
         };
       `;
-      const blob = new Blob([workerSource], { type: "application/javascript" });
+      const blob = new Blob([code], { type: "text/javascript" });
       const url = URL.createObjectURL(blob);
-      const worker = new Worker(url);
+      const worker = new Worker(url, { type: "module" });
       worker._url = url;
       return worker;
     }
 
-    function hashInWorker(worker, buffer, id) {
+    function runInWorker(worker, payload) {
       return new Promise((resolve, reject) => {
+        const id = Math.random().toString(36).slice(2);
+
         const onMessage = (event) => {
           const data = event.data;
           if (!data || data.id !== id) return;
           worker.removeEventListener("message", onMessage);
           worker.removeEventListener("error", onError);
-          if (data.ok) {
-            resolve(data);
-          } else {
-            reject(new Error(data.error || "Worker hashing failed"));
-          }
+          if (data.ok) resolve(data.result);
+          else reject(new Error(data.error || "Worker failed"));
         };
 
         const onError = (err) => {
@@ -168,114 +432,159 @@
 
         worker.addEventListener("message", onMessage);
         worker.addEventListener("error", onError);
-
-        // Transfer the buffer so it is not cloned.
-        worker.postMessage({ id, buffer }, [buffer]);
+        worker.postMessage({ id, ...payload });
       });
     }
 
-    async function readFileToArrayBuffer(file) {
-      const t0 = performance.now();
-      const buffer = await file.arrayBuffer();
-      const t1 = performance.now();
-      return {
-        buffer,
-        readMs: t1 - t0
-      };
+    async function oneRun(file, chunkSize, worker) {
+      const out = [];
+      out.push(await sha256SubtleMain(file));
+      out.push(await runInWorker(worker, { type: "subtle-worker", file }));
+      out.push(await sha256HashWasmMain(file, chunkSize));
+      out.push(await runInWorker(worker, { type: "hashwasm-worker", file, chunkSize }));
+      return out;
     }
 
-    async function singleRun(file, worker, runIndex) {
-      const totalStart = performance.now();
+    function summarize(allResults, fileSize) {
+      const grouped = new Map();
 
-      const { buffer, readMs } = await readFileToArrayBuffer(file);
+      for (const r of allResults) {
+        if (!grouped.has(r.approach)) grouped.set(r.approach, []);
+        grouped.get(r.approach).push(r);
+      }
 
-      const workerResult = await hashInWorker(worker, buffer, `run-${runIndex}-${Math.random()}`);
+      const referenceDigest = allResults[0]?.digestHex ?? null;
+      const summary = [];
 
-      const totalEnd = performance.now();
+      for (const [approach, rows] of grouped.entries()) {
+        const read = rows.map(x => x.readMs);
+        const hash = rows.map(x => x.hashMs);
+        const total = rows.map(x => x.totalMs);
+        const digestMatch = rows.every(x => x.digestHex === referenceDigest);
 
-      return {
-        readMs,
-        hashMs: workerResult.hashMs,
-        totalMs: totalEnd - totalStart,
-        digestHex: hexFromBuffer(workerResult.digest)
-      };
+        summary.push({
+          approach,
+          avgRead: avg(read),
+          avgHash: avg(hash),
+          avgTotal: avg(total),
+          minTotal: min(total),
+          maxTotal: max(total),
+          hashMiBps: Number(fmtMiBps(fileSize, avg(hash))),
+          totalMiBps: Number(fmtMiBps(fileSize, avg(total))),
+          digestMatch,
+          digestHex: rows[0].digestHex
+        });
+      }
+
+      summary.sort((a, b) => a.avgTotal - b.avgTotal);
+      return summary;
     }
+
+    function renderSummary(summary) {
+      tbody.innerHTML = "";
+      for (const row of summary) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = \`
+          <td>\${row.approach}</td>
+          <td class="mono">\${fmtMs(row.avgRead)}</td>
+          <td class="mono">\${fmtMs(row.avgHash)}</td>
+          <td class="mono">\${fmtMs(row.avgTotal)}</td>
+          <td class="mono">\${row.hashMiBps.toFixed(2)}</td>
+          <td class="mono">\${row.totalMiBps.toFixed(2)}</td>
+          <td class="\${row.digestMatch ? "good" : "bad"}">\${row.digestMatch ? "yes" : "no"}</td>
+        \`;
+        tbody.appendChild(tr);
+      }
+    }
+
+    function buildCopyableSummary(file, chunkSize, summary) {
+      const lines = [];
+      lines.push(\`SHA-256 browser benchmark\`);
+      lines.push(\`File: \${file.name}\`);
+      lines.push(\`Size: \${file.size} bytes (\${fmtMiB(file.size)} MiB)\`);
+      lines.push(\`Chunk size: \${fmtMiB(chunkSize)} MiB\`);
+      lines.push(\`UA: \${navigator.userAgent}\`);
+      lines.push("");
+      for (const s of summary) {
+        lines.push(
+          \`\${s.approach}: avgRead=\${fmtMs(s.avgRead)}, avgHash=\${fmtMs(s.avgHash)}, avgTotal=\${fmtMs(s.avgTotal)}, hashMiBps=\${s.hashMiBps.toFixed(2)}, totalMiBps=\${s.totalMiBps.toFixed(2)}, digestMatch=\${s.digestMatch}\`
+        );
+      }
+      return lines.join("\\n");
+    }
+
+    let lastSummaryText = "";
 
     async function runBenchmark() {
-      const file = fileInput.files && fileInput.files[0];
+      const file = fileInput.files?.[0];
       if (!file) {
         log("Select a file first.");
         return;
       }
+      if (!window.isSecureContext) {
+        log("This page is not in a secure context. WebCrypto may not work here.");
+        return;
+      }
 
-      const runs = Math.max(1, Math.min(50, Number(runsInput.value) || 1));
+      const runs = Math.max(1, Math.min(20, Number(runsInput.value) || 1));
+      const chunkSize = Number(chunkSizeSelect.value);
       const doWarmup = warmupInput.checked;
 
       runBtn.disabled = true;
+      copyBtn.disabled = true;
+      setStatus("running...");
 
-      const worker = createWorker();
+      const worker = makeWorker();
 
       try {
         log("");
-        log("=== SHA-256 browser benchmark ===");
-        log(`File: ${file.name}`);
-        log(`Size: ${file.size} bytes (${fmtMB(file.size)} MiB)`);
-        log(`Runs: ${runs}`);
-        log(`Warmup: ${doWarmup ? "yes" : "no"}`);
+        log("=== new benchmark ===");
+        log(\`file: \${file.name}\`);
+        log(\`size: \${file.size} bytes (\${fmtMiB(file.size)} MiB)\`);
+        log(\`runs: \${runs}\`);
+        log(\`chunkSize: \${chunkSize} bytes (\${fmtMiB(chunkSize)} MiB)\`);
+        log(\`secureContext: \${window.isSecureContext}\`);
         log("");
 
         if (doWarmup) {
-          log("Warmup run...");
-          const warmup = await singleRun(file, worker, "warmup");
-          log(
-            `Warmup: read=${fmtMs(warmup.readMs)}, hash=${fmtMs(warmup.hashMs)}, total=${fmtMs(warmup.totalMs)}, hash throughput=${fmtMBps(file.size, warmup.hashMs)} MiB/s`
-          );
+          log("Warmup...");
+          await oneRun(file, chunkSize, worker);
+          log("Warmup done.");
           log("");
         }
 
-        const readTimes = [];
-        const hashTimes = [];
-        const totalTimes = [];
-        let finalDigestHex = null;
-
+        const all = [];
         for (let i = 0; i < runs; i++) {
-          const result = await singleRun(file, worker, i + 1);
-          readTimes.push(result.readMs);
-          hashTimes.push(result.hashMs);
-          totalTimes.push(result.totalMs);
-          if (!finalDigestHex) finalDigestHex = result.digestHex;
-
-          log(
-            `Run ${i + 1}: ` +
-            `read=${fmtMs(result.readMs)} (${fmtMBps(file.size, result.readMs)} MiB/s), ` +
-            `hash=${fmtMs(result.hashMs)} (${fmtMBps(file.size, result.hashMs)} MiB/s), ` +
-            `total=${fmtMs(result.totalMs)} (${fmtMBps(file.size, result.totalMs)} MiB/s)`
-          );
+          setStatus(\`running \${i + 1}/\${runs}\`);
+          log(\`Run \${i + 1}/\${runs}\`);
+          const run = await oneRun(file, chunkSize, worker);
+          for (const r of run) {
+            all.push(r);
+            log(
+              \`  \${r.approach}: read=\${fmtMs(r.readMs)}, hash=\${fmtMs(r.hashMs)}, total=\${fmtMs(r.totalMs)}, hashMiBps=\${fmtMiBps(file.size, r.hashMs)}, totalMiBps=\${fmtMiBps(file.size, r.totalMs)}\`
+            );
+          }
+          log("");
         }
 
-        log("");
-        log(`SHA-256: ${finalDigestHex}`);
-        log("");
-        log("=== Summary ===");
-        log(
-          `Read  avg=${fmtMs(avg(readTimes))}, min=${fmtMs(min(readTimes))}, max=${fmtMs(max(readTimes))}`
-        );
-        log(
-          `Hash  avg=${fmtMs(avg(hashTimes))}, min=${fmtMs(min(hashTimes))}, max=${fmtMs(max(hashTimes))}`
-        );
-        log(
-          `Total avg=${fmtMs(avg(totalTimes))}, min=${fmtMs(min(totalTimes))}, max=${fmtMs(max(totalTimes))}`
-        );
-        log(
-          `Avg hash throughput: ${fmtMBps(file.size, avg(hashTimes))} MiB/s`
-        );
-        log(
-          `Avg total throughput: ${fmtMBps(file.size, avg(totalTimes))} MiB/s`
-        );
+        const summary = summarize(all, file.size);
+        renderSummary(summary);
+
+        log("=== summary ===");
+        for (const s of summary) {
+          log(
+            \`\${s.approach}: avgRead=\${fmtMs(s.avgRead)}, avgHash=\${fmtMs(s.avgHash)}, avgTotal=\${fmtMs(s.avgTotal)}, minTotal=\${fmtMs(s.minTotal)}, maxTotal=\${fmtMs(s.maxTotal)}, hashMiBps=\${s.hashMiBps.toFixed(2)}, totalMiBps=\${s.totalMiBps.toFixed(2)}, digestMatch=\${s.digestMatch}\`
+          );
+        }
         log("");
 
+        lastSummaryText = buildCopyableSummary(file, chunkSize, summary);
+        copyBtn.disabled = false;
+        setStatus("done");
       } catch (err) {
-        log(`ERROR: ${err && err.message ? err.message : String(err)}`);
+        console.error(err);
+        log(\`ERROR: \${err?.message || String(err)}\`);
+        setStatus("failed");
       } finally {
         worker.terminate();
         URL.revokeObjectURL(worker._url);
@@ -284,8 +593,22 @@
     }
 
     runBtn.addEventListener("click", runBenchmark);
+
+    copyBtn.addEventListener("click", async () => {
+      if (!lastSummaryText) return;
+      try {
+        await navigator.clipboard.writeText(lastSummaryText);
+        setStatus("summary copied");
+      } catch (err) {
+        log("Could not copy to clipboard.");
+      }
+    });
+
     clearBtn.addEventListener("click", () => {
       logEl.textContent = "";
+      tbody.innerHTML = "";
+      lastSummaryText = "";
+      setStatus("");
     });
   </script>
 </body>

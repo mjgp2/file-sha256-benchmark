@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>SHA-256 Browser Benchmark</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 960px;
+      margin: 24px auto;
+      padding: 0 16px;
+      line-height: 1.4;
+    }
+    h1 { margin-bottom: 8px; }
+    .row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin: 12px 0;
+    }
+    input[type="number"] {
+      width: 80px;
+      padding: 4px 6px;
+    }
+    button, input[type="file"] {
+      padding: 6px 8px;
+    }
+    pre {
+      background: #111;
+      color: #ddd;
+      padding: 16px;
+      border-radius: 8px;
+      overflow: auto;
+      min-height: 320px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .muted {
+      color: #555;
+      font-size: 0.95rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>SHA-256 Browser Benchmark</h1>
+  <div class="muted">
+    Reads the selected file, transfers the buffer to a Web Worker, hashes with SubtleCrypto,
+    and logs timings plus throughput.
+  </div>
+
+  <div class="row">
+    <input id="fileInput" type="file" />
+    <label>
+      Runs:
+      <input id="runsInput" type="number" min="1" max="50" value="5" />
+    </label>
+    <label>
+      Warmup:
+      <input id="warmupInput" type="checkbox" checked />
+    </label>
+    <button id="runBtn">Run benchmark</button>
+    <button id="clearBtn">Clear log</button>
+  </div>
+
+  <pre id="log"></pre>
+
+  <script>
+    const logEl = document.getElementById("log");
+    const fileInput = document.getElementById("fileInput");
+    const runsInput = document.getElementById("runsInput");
+    const warmupInput = document.getElementById("warmupInput");
+    const runBtn = document.getElementById("runBtn");
+    const clearBtn = document.getElementById("clearBtn");
+
+    function log(msg = "") {
+      logEl.textContent += msg + "\n";
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function fmtMs(ms) {
+      return `${ms.toFixed(2)} ms`;
+    }
+
+    function fmtMB(bytes) {
+      return (bytes / (1024 * 1024)).toFixed(2);
+    }
+
+    function fmtMBps(bytes, ms) {
+      const seconds = ms / 1000;
+      return seconds > 0 ? (bytes / (1024 * 1024) / seconds).toFixed(2) : "0.00";
+    }
+
+    function avg(arr) {
+      return arr.reduce((a, b) => a + b, 0) / arr.length;
+    }
+
+    function min(arr) {
+      return Math.min(...arr);
+    }
+
+    function max(arr) {
+      return Math.max(...arr);
+    }
+
+    function hexFromBuffer(buffer) {
+      const bytes = new Uint8Array(buffer);
+      let out = "";
+      for (let i = 0; i < bytes.length; i++) {
+        out += bytes[i].toString(16).padStart(2, "0");
+      }
+      return out;
+    }
+
+    function createWorker() {
+      const workerSource = `
+        self.onmessage = async (event) => {
+          const { id, buffer } = event.data;
+          try {
+            const t0 = performance.now();
+            const digest = await crypto.subtle.digest("SHA-256", buffer);
+            const t1 = performance.now();
+            self.postMessage(
+              {
+                id,
+                ok: true,
+                digest,
+                hashMs: t1 - t0
+              },
+              [digest]
+            );
+          } catch (err) {
+            self.postMessage({
+              id,
+              ok: false,
+              error: err && err.message ? err.message : String(err)
+            });
+          }
+        };
+      `;
+      const blob = new Blob([workerSource], { type: "application/javascript" });
+      const url = URL.createObjectURL(blob);
+      const worker = new Worker(url);
+      worker._url = url;
+      return worker;
+    }
+
+    function hashInWorker(worker, buffer, id) {
+      return new Promise((resolve, reject) => {
+        const onMessage = (event) => {
+          const data = event.data;
+          if (!data || data.id !== id) return;
+          worker.removeEventListener("message", onMessage);
+          worker.removeEventListener("error", onError);
+          if (data.ok) {
+            resolve(data);
+          } else {
+            reject(new Error(data.error || "Worker hashing failed"));
+          }
+        };
+
+        const onError = (err) => {
+          worker.removeEventListener("message", onMessage);
+          worker.removeEventListener("error", onError);
+          reject(err);
+        };
+
+        worker.addEventListener("message", onMessage);
+        worker.addEventListener("error", onError);
+
+        // Transfer the buffer so it is not cloned.
+        worker.postMessage({ id, buffer }, [buffer]);
+      });
+    }
+
+    async function readFileToArrayBuffer(file) {
+      const t0 = performance.now();
+      const buffer = await file.arrayBuffer();
+      const t1 = performance.now();
+      return {
+        buffer,
+        readMs: t1 - t0
+      };
+    }
+
+    async function singleRun(file, worker, runIndex) {
+      const totalStart = performance.now();
+
+      const { buffer, readMs } = await readFileToArrayBuffer(file);
+
+      const workerResult = await hashInWorker(worker, buffer, `run-${runIndex}-${Math.random()}`);
+
+      const totalEnd = performance.now();
+
+      return {
+        readMs,
+        hashMs: workerResult.hashMs,
+        totalMs: totalEnd - totalStart,
+        digestHex: hexFromBuffer(workerResult.digest)
+      };
+    }
+
+    async function runBenchmark() {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) {
+        log("Select a file first.");
+        return;
+      }
+
+      const runs = Math.max(1, Math.min(50, Number(runsInput.value) || 1));
+      const doWarmup = warmupInput.checked;
+
+      runBtn.disabled = true;
+
+      const worker = createWorker();
+
+      try {
+        log("");
+        log("=== SHA-256 browser benchmark ===");
+        log(`File: ${file.name}`);
+        log(`Size: ${file.size} bytes (${fmtMB(file.size)} MiB)`);
+        log(`Runs: ${runs}`);
+        log(`Warmup: ${doWarmup ? "yes" : "no"}`);
+        log("");
+
+        if (doWarmup) {
+          log("Warmup run...");
+          const warmup = await singleRun(file, worker, "warmup");
+          log(
+            `Warmup: read=${fmtMs(warmup.readMs)}, hash=${fmtMs(warmup.hashMs)}, total=${fmtMs(warmup.totalMs)}, hash throughput=${fmtMBps(file.size, warmup.hashMs)} MiB/s`
+          );
+          log("");
+        }
+
+        const readTimes = [];
+        const hashTimes = [];
+        const totalTimes = [];
+        let finalDigestHex = null;
+
+        for (let i = 0; i < runs; i++) {
+          const result = await singleRun(file, worker, i + 1);
+          readTimes.push(result.readMs);
+          hashTimes.push(result.hashMs);
+          totalTimes.push(result.totalMs);
+          if (!finalDigestHex) finalDigestHex = result.digestHex;
+
+          log(
+            `Run ${i + 1}: ` +
+            `read=${fmtMs(result.readMs)} (${fmtMBps(file.size, result.readMs)} MiB/s), ` +
+            `hash=${fmtMs(result.hashMs)} (${fmtMBps(file.size, result.hashMs)} MiB/s), ` +
+            `total=${fmtMs(result.totalMs)} (${fmtMBps(file.size, result.totalMs)} MiB/s)`
+          );
+        }
+
+        log("");
+        log(`SHA-256: ${finalDigestHex}`);
+        log("");
+        log("=== Summary ===");
+        log(
+          `Read  avg=${fmtMs(avg(readTimes))}, min=${fmtMs(min(readTimes))}, max=${fmtMs(max(readTimes))}`
+        );
+        log(
+          `Hash  avg=${fmtMs(avg(hashTimes))}, min=${fmtMs(min(hashTimes))}, max=${fmtMs(max(hashTimes))}`
+        );
+        log(
+          `Total avg=${fmtMs(avg(totalTimes))}, min=${fmtMs(min(totalTimes))}, max=${fmtMs(max(totalTimes))}`
+        );
+        log(
+          `Avg hash throughput: ${fmtMBps(file.size, avg(hashTimes))} MiB/s`
+        );
+        log(
+          `Avg total throughput: ${fmtMBps(file.size, avg(totalTimes))} MiB/s`
+        );
+        log("");
+
+      } catch (err) {
+        log(`ERROR: ${err && err.message ? err.message : String(err)}`);
+      } finally {
+        worker.terminate();
+        URL.revokeObjectURL(worker._url);
+        runBtn.disabled = false;
+      }
+    }
+
+    runBtn.addEventListener("click", runBenchmark);
+    clearBtn.addEventListener("click", () => {
+      logEl.textContent = "";
+    });
+  </script>
+</body>
+</html>
